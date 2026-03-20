@@ -14,6 +14,13 @@
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
+    <!-- Auth Check -->
+    <script>
+        if (localStorage.getItem('sms_isLoggedIn') !== 'true') {
+            window.location.href = 'login.html';
+        }
+    </script>
+
     <style>
         body { font-family: 'Poppins', sans-serif; }
         .hide { display: none; }
@@ -128,8 +135,21 @@
                 </div>
                 <div class="flex items-center gap-4">
                     <div class="relative">
-                        <span class="absolute top-0 right-0 h-2 w-2 rounded-full bg-red-500 ring-2 ring-white"></span>
-                        <i class="fa-regular fa-bell text-gray-500 text-xl cursor-pointer"></i>
+                        <button id="notif-btn" onclick="toggleNotifications()" class="relative focus:outline-none">
+                            <span id="notif-badge" class="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 ring-2 ring-white text-[10px] text-white flex items-center justify-center hidden">0</span>
+                            <i class="fa-regular fa-bell text-gray-500 text-xl cursor-pointer hover:text-green-600 transition"></i>
+                        </button>
+                        <!-- Dropdown -->
+                        <div id="notification-dropdown" class="hidden absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-xl border border-gray-100 z-50 overflow-hidden">
+                            <div class="p-3 border-b flex justify-between items-center bg-gray-50">
+                                <h4 class="text-sm font-bold text-gray-700">Notifications</h4>
+                                <button onclick="markAllRead()" class="text-xs text-blue-500 hover:text-blue-700">Mark all read</button>
+                            </div>
+                            <div id="notification-list" class="max-h-64 overflow-y-auto"></div>
+                            <div class="p-2 border-t text-center">
+                                <button onclick="showSection('notices'); toggleNotifications()" class="text-xs text-green-600 font-medium hover:underline">View Notice Board</button>
+                            </div>
+                        </div>
                     </div>
                     <div class="flex items-center gap-2">
                         <div class="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-green-700 font-bold">A</div>
@@ -229,7 +249,7 @@
                     
                     <div class="bg-white rounded-xl shadow-sm">
                         <div class="overflow-x-auto">
-                            <table class="w-full text-left border-collapse min-w-[600px]">
+                            <table id="student-table" class="w-full text-left border-collapse min-w-[600px]">
                                 <thead class="bg-gray-50 text-gray-600 uppercase text-xs">
                                     <tr>
                                         <th class="p-4 border-b">ID</th>
@@ -532,8 +552,8 @@
                         {id: 2, name: 'Ms. Ayesha', subject: 'English', email: 'ayesha@ssilm.edu', salary: 55000}
                     ]);
                     DB.set('notices', [
-                        {id: 1, title: 'Summer Vacation', content: 'School will remain closed from June 1st to August 15th.', date: '2023-05-20'},
-                        {id: 2, title: 'Fee Submission Deadline', content: 'Last date for fee submission is the 10th of every month.', date: '2023-09-01'}
+                        {id: 1, title: 'Summer Vacation', content: 'School will remain closed from June 1st to August 15th.', date: '2023-05-20', read: false},
+                        {id: 2, title: 'Fee Submission Deadline', content: 'Last date for fee submission is the 10th of every month.', date: '2023-09-01', read: false}
                     ]);
                     DB.set('fees', [
                         {id: 101, studentId: 1, amount: 5000, date: '2023-10-01', status: 'Paid'},
@@ -558,10 +578,21 @@
             DB.init();
             document.getElementById('today-date').innerText = new Date().toLocaleDateString();
             loadDashboard();
+            updateNotificationBadge();
+            
+            // Close dropdown when clicking outside
+            window.addEventListener('click', function(e) {
+                const btn = document.getElementById('notif-btn');
+                const dropdown = document.getElementById('notification-dropdown');
+                if (!btn.contains(e.target) && !dropdown.contains(e.target)) {
+                    dropdown.classList.add('hidden');
+                }
+            });
         };
 
         function logout() {
-            location.reload();
+            localStorage.removeItem('sms_isLoggedIn');
+            window.location.href = 'login.html';
         }
 
         // --- NAVIGATION ---
@@ -940,13 +971,13 @@
 
         function switchAttendance(mode) {
             currentAttMode = mode;
-            document.getElementById('att-tab-student').className = mode === 'student' ? 
-                'pb-2 border-b-2 border-green-600 font-bold text-green-600 transition' : 
-                'pb-2 border-b-2 border-transparent text-gray-500 hover:text-green-600 transition';
+            const activeClass = 'pb-2 border-b-2 border-green-600 font-bold text-green-600 transition';
+            const inactiveClass = 'pb-2 border-b-2 border-transparent text-gray-500 hover:text-green-600 transition';
             
-            document.getElementById('att-tab-teacher').className = mode === 'teacher' ? 
-                'pb-2 border-b-2 border-green-600 font-bold text-green-600 transition' : 
-                'pb-2 border-b-2 border-transparent text-gray-500 hover:text-green-600 transition';
+            const isStudent = mode === 'student';
+            
+            document.getElementById('att-tab-student').className = isStudent ? activeClass : inactiveClass;
+            document.getElementById('att-tab-teacher').className = !isStudent ? activeClass : inactiveClass;
             
             renderAttendance();
         }
@@ -1007,11 +1038,13 @@
                 id: Date.now(),
                 title: document.getElementById('notice-title').value,
                 content: document.getElementById('notice-content').value,
-                date: new Date().toISOString().split('T')[0]
+                date: new Date().toISOString().split('T')[0],
+                read: false
             });
             DB.set('notices', notices);
             e.target.reset();
             renderNotices();
+            updateNotificationBadge();
             showToast('Notice Posted');
         }
 
@@ -1060,6 +1093,60 @@
             renderExams();
             showToast('Result Added');
             e.target.reset();
+        }
+
+        // --- NOTIFICATIONS ---
+        function toggleNotifications() {
+            const dropdown = document.getElementById('notification-dropdown');
+            dropdown.classList.toggle('hidden');
+            if(!dropdown.classList.contains('hidden')) {
+                renderNotificationDropdown();
+            }
+        }
+
+        function renderNotificationDropdown() {
+            const notices = DB.get('notices');
+            const list = document.getElementById('notification-list');
+            // Sort by id desc (newest first)
+            const recent = notices.sort((a,b) => b.id - a.id).slice(0, 5); 
+            
+            if (recent.length === 0) {
+                list.innerHTML = '<div class="p-4 text-center text-sm text-gray-500">No notifications</div>';
+                return;
+            }
+
+            list.innerHTML = recent.map(n => `
+                <div class="p-3 border-b hover:bg-gray-50 cursor-pointer ${!n.read ? 'bg-blue-50' : ''}" onclick="showSection('notices'); toggleNotifications()">
+                    <div class="flex justify-between items-start">
+                        <p class="text-sm font-medium text-gray-800 line-clamp-1">${n.title}</p>
+                        ${!n.read ? '<span class="h-2 w-2 rounded-full bg-blue-500 mt-1 flex-shrink-0"></span>' : ''}
+                    </div>
+                    <p class="text-xs text-gray-500 line-clamp-2 mt-1">${n.content}</p>
+                    <p class="text-[10px] text-gray-400 mt-1 text-right">${n.date}</p>
+                </div>
+            `).join('');
+        }
+
+        function updateNotificationBadge() {
+            const notices = DB.get('notices');
+            // Check if n.read is falsy (undefined or false) to handle legacy data
+            const unreadCount = notices.filter(n => !n.read).length;
+            const badge = document.getElementById('notif-badge');
+            
+            if(unreadCount > 0) {
+                badge.innerText = unreadCount > 9 ? '9+' : unreadCount;
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
+        }
+
+        function markAllRead() {
+            let notices = DB.get('notices');
+            notices = notices.map(n => ({...n, read: true}));
+            DB.set('notices', notices);
+            updateNotificationBadge();
+            renderNotificationDropdown();
         }
 
         // --- UTILS ---
